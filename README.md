@@ -75,6 +75,98 @@ Data issues the pipeline handles:
 - **Locations** — 660 district/city slugs mapped to Peru's 25 regions + Callao through a seed table
   ([seeds/location_region.csv](seeds/location_region.csv)); covers 99.7% of rows. Ambiguous names
   (e.g. `santa-rosa`, which exists in several regions) stay `unmapped` on purpose.
+- **Links without a location** — Bumeran URLs carry no location at all, so its ads get the region
+  `not_provided`; they are not counted as `unmapped` by the quality gates.
+
+## Results
+
+What a full run produces in SQL Server (database `jobads`, schema `dw`). Numbers below are from a run on
+the complete dataset.
+
+### Warehouse
+
+| Table | Rows | Grain |
+|---|---:|---|
+| `dw.dim_ad` | 752,700 | One row per unique ad: title, location, region, first/last seen, days visible, censoring flag |
+| `dw.fact_ad_snapshot` | 987,869 | One row per ad per snapshot date it was listed |
+| `dw.fact_daily_listing` | 7,416 | Ads listed and new ads per date × portal × region |
+| `dw.dim_region` | 29 | 25 regions + Callao, plus `unmapped` and `not_provided` |
+| `dw.file_audit` | 394 | Line counts and data-quality figures per source file |
+
+### Where are the jobs? — `dw.v_region_share`
+
+Top 10 regions, all portals, ads with a known location:
+
+| Region | Ads | Share |
+|---|---:|---:|
+| Lima | 479,291 | 70.9% |
+| Arequipa | 40,920 | 6.1% |
+| La Libertad | 25,577 | 3.8% |
+| Piura | 16,795 | 2.5% |
+| Ica | 14,503 | 2.1% |
+| Lambayeque | 13,294 | 2.0% |
+| Junín | 12,043 | 1.8% |
+| Callao | 8,875 | 1.3% |
+| Áncash | 7,821 | 1.2% |
+| Cajamarca | 7,545 | 1.1% |
+
+Lima + Callao share by portal: Mipleo 76.8%, Computrabajo 76.2%, Buscotrabajo 62.6% — Buscotrabajo is the
+most regional of the four. Bumeran is left out (no location in its links).
+
+### How long do ads stay online? — `dw.v_ad_duration_by_portal`
+
+Only uncensored ads (first and last appearance both inside the scraping window):
+
+| Portal | Ads | Avg days visible | Max days | Seen in a single snapshot |
+|---|---:|---:|---:|---:|
+| Computrabajo | 366,073 | 1.8 | 237 | 84.3% |
+| Buscotrabajo | 199,817 | 2.3 | 61 | 86.1% |
+| Mipleo | 85,814 | 1.0 | 2 | 95.6% |
+| Bumeran | 67,223 | 2.7 | 241 | 94.4% |
+
+Most ads appear in only one snapshot, so these durations mostly reflect how often each portal was
+scraped, not true posting lifetimes (see [Limitations](#limitations)).
+
+### New ads per month — `dw.v_new_ads_monthly`
+
+| Month | Computrabajo | Buscotrabajo | Mipleo | Bumeran | Total | Snapshots (CT / BT / MP / BU) |
+|---|---:|---:|---:|---:|---:|---|
+| 2023-06 | 24,709 | 5,536 | – | 6,193 | 36,438 | 3 / 14 / – / 3 |
+| 2023-07 | 47,235 | 8,324 | – | 13,029 | 68,588 | 4 / 16 / – / 4 |
+| 2023-08 | 53,015 | 22,415 | – | 14,527 | 89,957 | 18 / 20 / – / 5 |
+| 2023-09 | 28,526 | 15,458 | – | 5,792 | 49,776 | 12 / 13 / – / 2 |
+| 2023-10 | 45,240 | 18,525 | – | 6,317 | 70,082 | 18 / 19 / – / 2 |
+| 2023-11 | 53,461 | 26,443 | – | 0 | 79,904 | 20 / 23 / – / 0 |
+| 2023-12 | 51,973 | 41,567 | 25,397 | 7,033 | 125,970 | 25 / 26 / 15 / 16 |
+| 2024-01 | 49,596 | 51,572 | 60,417 | 10,872 | 172,457 | 23 / 24 / 23 / 24 |
+| 2024-02 | 16,415 | 12,027 | 389 | 4,035 | 32,866 | 7 / 7 / 1 / 7 |
+
+Each portal's first snapshot is excluded (every ad on it would count as new). Monthly totals follow the
+number of snapshots taken, so compare months only alongside the snapshot column: the Dec–Jan jump is
+mostly Mipleo joining and daily scraping, and February stops on the 15th.
+
+### Most frequent job titles — `dw.v_top_titles`
+
+Top 3 per portal (titles come from URL slugs; long ones shortened here):
+
+| Portal | # | Title | Ads |
+|---|---:|---|---:|
+| Buscotrabajo | 1 | asistente contable | 618 |
+| | 2 | asistente administrativo | 602 |
+| | 3 | operario de limpieza | 405 |
+| Computrabajo | 1 | 50 operarios de limpieza c/s experiencia bono de S/130 … | 420 |
+| | 2 | asistente contable | 362 |
+| | 3 | 50 operarios de limpieza con o sin experiencia bono S/130 … | 310 |
+| Mipleo | 1 | 50 operarios de limpieza c/s experiencia bono de S/130 … | 398 |
+| | 2 | comisiona ilimitado trabajando como asesor de ventas centro de lima | 145 |
+| | 3 | asistente contable | 137 |
+| Bumeran | 1 | home office asesores de cobranzas … v v soluciones sac | 100 |
+| | 2 | asesor de cobranzas planilla completa comisiones … v v soluciones sac | 97 |
+| | 3 | vendedores y promotores | 82 |
+
+Accounting assistants, administrative assistants and cleaning staff lead on the general portals; one
+mass cleaning-staff campaign is reposted many times across Computrabajo and Mipleo, and a single
+collections company dominates Bumeran's top titles.
 
 ## Data quality
 
