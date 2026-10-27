@@ -1,0 +1,2 @@
+pyspark==3.5.1
+pymssql==2.3.1
