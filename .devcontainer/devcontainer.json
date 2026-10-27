@@ -14,5 +14,6 @@
     "9870": { "label": "HDFS UI" },
     "1433": { "label": "SQL Server", "onAutoForward": "silent" }
   },
-  "postCreateCommand": "pip install --user pytest"
+  "postCreateCommand": "pip install --user pytest",
+  "postStartCommand": "bash .devcontainer/allow-compose-bridge.sh"
 }

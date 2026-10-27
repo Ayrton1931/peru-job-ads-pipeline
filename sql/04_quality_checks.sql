@@ -42,4 +42,5 @@ SELECT 'unmapped_region_over_2pct',
        CONCAT('unmapped share = ',
               CAST(100.0 * SUM(CASE WHEN r.region = 'unmapped' THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0) AS DECIMAL(5, 2)), '%')
 FROM dw.dim_ad a
-JOIN dw.dim_region r ON r.region_key = a.region_key;
+JOIN dw.dim_region r ON r.region_key = a.region_key
+WHERE r.region <> 'not_provided';  -- ads whose link has no location (Bumeran) cannot be mapped

@@ -71,12 +71,19 @@ def main():
         )
     )
 
+    # Links without a location (all of Bumeran) are "not_provided"; locations missing from the
+    # seed (or ambiguous on purpose) are "unmapped". Only the latter count against the gate.
     regions = spark.read.option("header", True).csv(f"file://{SEEDS_DIR}/location_region.csv")
+    location_key = F.coalesce("location_slug", "region_slug")
     silver = (
         ads.filter("rn = 1")
-        .withColumn("location_key", F.coalesce("location_slug", "region_slug"))
+        .withColumn("location_key", F.when(location_key != "", location_key))
         .join(F.broadcast(regions.withColumnRenamed("location_slug", "location_key")), "location_key", "left")
-        .withColumn("region", F.coalesce("region", F.lit("unmapped")))
+        .withColumn(
+            "region",
+            F.when(F.col("location_key").isNull(), F.lit("not_provided"))
+            .otherwise(F.coalesce("region", F.lit("unmapped"))),
+        )
         .select(
             "portal", "ad_id", "snapshot_date", "snapshot_freq", "title",
             "location_slug", "region", "url_path", "source_file",
@@ -95,10 +102,12 @@ def main():
     ).first()
     s = spark.read.parquet(SILVER)
     unmapped = s.filter(F.col("region") == "unmapped").count()
+    not_provided = s.filter(F.col("region") == "not_provided").count()
     rows = s.count()
+    rows_with_location = rows - not_provided
 
     print(f"lines={a.total} ad_lines={a.ads} unparsed={a.unparsed} silver_rows={rows} "
-          f"unmapped_region={unmapped} files_without_ads={a.files_without_ads}")
+          f"unmapped_region={unmapped} no_location={not_provided} files_without_ads={a.files_without_ads}")
     s.groupBy("portal").agg(F.count("*").alias("rows"), F.countDistinct("ad_id").alias("unique_ads")).show()
 
     errors = []
@@ -106,8 +115,9 @@ def main():
         errors.append(f"unparsed share {a.unparsed / a.total:.3%} > {MAX_UNPARSED_SHARE:.1%}")
     if a.files_without_ads:
         errors.append(f"{a.files_without_ads} files produced no ads")
-    if unmapped / max(rows, 1) > MAX_UNMAPPED_REGION_SHARE:
-        errors.append(f"unmapped region share {unmapped / rows:.3%} > {MAX_UNMAPPED_REGION_SHARE:.1%}")
+    if unmapped / max(rows_with_location, 1) > MAX_UNMAPPED_REGION_SHARE:
+        errors.append(f"unmapped region share {unmapped / rows_with_location:.3%} "
+                      f"> {MAX_UNMAPPED_REGION_SHARE:.1%}")
     if errors:
         raise SystemExit("silver quality gate failed: " + "; ".join(errors))
 
