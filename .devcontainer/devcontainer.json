@@ -1,0 +1,18 @@
+{
+  "name": "peru-job-ads-pipeline",
+  "image": "mcr.microsoft.com/devcontainers/python:3.11",
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {}
+  },
+  "hostRequirements": {
+    "cpus": 4,
+    "memory": "16gb"
+  },
+  "forwardPorts": [8080, 9870, 1433],
+  "portsAttributes": {
+    "8080": { "label": "Airflow" },
+    "9870": { "label": "HDFS UI" },
+    "1433": { "label": "SQL Server", "onAutoForward": "silent" }
+  },
+  "postCreateCommand": "pip install --user pytest"
+}
